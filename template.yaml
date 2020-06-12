@@ -1,0 +1,59 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: template
+Parameters:
+  ResourceTag:
+    Type: String
+    Description: Tag applied to all resources
+  PipelineBucket:
+    Type: String
+    Description: S3 bucket with pipeline resources
+  StateWhiteList:
+    Type: String
+    Default: white_listed
+  StateProvisioned:
+    Type: String
+    Default: active  
+Resources:
+  Dynamo:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: SubTemplates/Dynamo/packaged.yaml
+      Parameters: 
+        ResourceTag: !Ref ResourceTag
+      Tags: 
+        Project: !Ref ResourceTag 
+      TimeoutInMinutes: 8
+  IoT:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: SubTemplates/IoT/packaged.yaml
+      Parameters: 
+        ResourceTag: !Ref ResourceTag
+        StateProvisioned: !Ref StateProvisioned
+        StateWhiteList: !Ref StateWhiteList
+      Tags: 
+        Project: !Ref ResourceTag 
+      TimeoutInMinutes: 8
+  SSM:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: SubTemplates/SSM/packaged.yaml
+      Parameters: 
+        ResourceTag: !Ref ResourceTag
+        StateProvisioned: !Ref StateProvisioned
+      Tags: 
+        Project: !Ref ResourceTag 
+      TimeoutInMinutes: 8
+
+Outputs:
+  ClientBucket:
+    Description: 'Bucket With Edge Device Client' 
+    Value: !GetAtt IoT.Outputs.SsmOnDemandBucket
+    Export: 
+      Name: ClientBucket 
+  ToggleSSMLambda:
+    Description: 'Lambda Function Used To Toggle SSM On/Off' 
+    Value: !GetAtt SSM.Outputs.ToggleSSMFunction
+    Export: 
+      Name: ToggleSSMLamba

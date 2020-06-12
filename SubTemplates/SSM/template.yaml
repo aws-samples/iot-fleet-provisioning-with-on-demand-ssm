@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: "SSM Setup"
+Parameters:
+  ResourceTag: 
+    Type: String
+  StateProvisioned:
+    Type: String
+Globals:
+  Function:
+    Timeout: 20
+    Runtime: python3.7
+    Environment:
+      Variables:
+        ResourceTag: !Ref ResourceTag
+Resources:
+  SetupInstanceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Add registered instance to database 
+      CodeUri: Lambdas/setup_instance_registered/
+      Handler: app.handler
+      Events:
+        InstanceRegistered:
+          Type: CloudWatchEvent
+          Properties:
+            Pattern: {"source": ["aws.ssm"],"detail-type": ["EC2 State Manager Instance Association State Change"]}
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ssm:ListTagsForResource
+              Resource: 
+              - arn:aws:ssm:*:*:managed-instance/*
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+              Resource: 
+              - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ResourceTag}  
+  SsmSetupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Sets up ssm inventory
+      CodeUri: Lambdas/setup_ssm/
+      Handler: app.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+              - ssm:CreateActivation
+              - ssm:DescribeActivations
+              - ssm:DeleteActivation
+              - ssm:AddTagsToResource
+              - ssm:DescribeInstanceInformation
+              Resource: "*"
+            - Effect: Allow
+              Action:
+              - ssm:CreateAssociation
+              - iam:PassRole
+              Resource: 
+              - "arn:aws:ssm:*:*:document/*"
+              - "arn:aws:ssm:*:*:managed-instance/*"
+              - "arn:aws:iam::*:role/*"
+            - Effect: Allow
+              Action:
+              - ssm:DeregisterManagedInstance
+              Resource: "arn:aws:ssm:*:*:managed-instance/*"
+            - Effect: Allow
+              Action:
+              - iam:PassRole
+              Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/${AutomationServiceRole}
+  SsmSetupCustom:
+    Type: Custom::SsmSetup
+    Properties:
+      ServiceToken: !GetAtt SsmSetupFunction.Arn         
+
+  ToggleSSMFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Sets up or deregisters instance in ssm
+      CodeUri: Lambdas/toggle_ssm/
+      Handler: app.handler
+      Timeout: 190
+      Environment:
+        Variables:
+          AutomationServiceRole: !Ref AutomationServiceRole
+          StateProvisioned: !Ref StateProvisioned
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AdministratorAccess
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+              - ssm:CreateActivation
+              - ssm:AddTagsToResource
+              - ssm:DescribeInstanceInformation
+              Resource: "*"
+            - Effect: Allow
+              Action:
+              - iam:PassRole
+              Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/${AutomationServiceRole}
+
+  AutomationServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ssm.amazonaws.com
+            - ec2.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      - arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole
+      Path: "/"
+      RoleName: !Sub AutomationServiceRole-${ResourceTag}
+
+Outputs:
+  ToggleSSMFunction:
+    Description: 'Lambda Function Used To Toggle SSM On/Off' 
+    Value: !Ref ToggleSSMFunction
+    Export: 
+      Name: ToggleSSMFunction 
